@@ -73,7 +73,7 @@ def fit_dists(ly, lprt, dist_list):
 
         try:
             with np.errstate(divide='ignore', invalid='ignore'):
-                up1, cov = so.curve_fit(distfit, lprt, ly, bounds = bnds, method='trf')
+                up1, cov = so.curve_fit(distfit, lprt, ly, bounds = bnds, method='trf', maxfev = 5000)
             e1_cdf = distfit(lprt, *up1)
             e1 = ly - e1_cdf
             sse1 = e1.T.dot(e1)
@@ -83,7 +83,7 @@ def fit_dists(ly, lprt, dist_list):
 
         try:
             with np.errstate(divide='ignore', invalid='ignore'):
-                up2, cov = so.curve_fit(distfit, lprt, ly, bounds = bnds, method='dogbox')
+                up2, cov = so.curve_fit(distfit, lprt, ly, bounds = bnds, method='dogbox', maxfev = 5000)
             e2_cdf = distfit(lprt, *up2)
             e2 = ly - e2_cdf
             sse2 = e2.T.dot(e2)

@@ -32,9 +32,10 @@ class RTD_util(object):
         self.ibound = np.asarray(self.bas.ibound.get_value())
         self.hk = np.asarray(self.upw.hk.get_value())
         self.vka = np.asarray(self.upw.vka.get_value())
-
         
-    def get_output_dfs(self):
+        self._len_mult()
+
+    def _get_output_dfs(self):
         # Make dataframes of budget information
         bud_file_unit = np.unique(self.oc.get_budgetunit())
         assert len(bud_file_unit == 1), 'More than one budget file is used'
@@ -46,15 +47,15 @@ class RTD_util(object):
         all_bud_df['kper'] -= 1
         all_bud_df['kstp'] -= 1
         self.all_bud_df = all_bud_df
-		
+        
         head_file_name = self.ml.get_output(unit=self.oc.iuhead)
         src = os.path.join(self.model_ws, head_file_name)
         self.hd_obj = fp.utils.HeadFile(src)       
 
-    def get_kstpkper(self, mf_start_date_str = '01/01/1900', mp_release_date_str = '01/01/2018' ):   
+    def _get_kstpkper(self, mf_start_date_str = '01/01/1900', mp_release_date_str = '01/01/2018' ):   
         # Use calendar release date and MODFLOW start date to pick out head and budget
         # items from transient model output
-        self.get_output_dfs()
+        self._get_output_dfs()
         
         # Create dictionary of multipliers for converting model time units to days
         time_dict = dict()
@@ -113,13 +114,14 @@ class RTD_util(object):
     def get_heads(self):
         # Get the highest non-dry head in the 2D representation of the MODFLOW model
         # in each vertical stack of cells
-        self.get_kstpkper()
+        self._get_kstpkper()
         heads = self.hd_obj.get_data(kstpkper=self.kstpkper)
         hd = heads.copy()
         hd[np.isclose(self.bas.hnoflo, hd)] = np.nan
         hd[np.isclose(self.upw.hdry, hd, 10)] = np.nan
-        hin = np.argmax(np.isfinite(hd), axis=0)    
-        self.water_table =  np.squeeze(hd[hin, self.r, self.c])
+        self.hd = hd
+        hin = np.argmax(np.isfinite(self.hd), axis=0)    
+        self.water_table =  np.squeeze(self.hd[hin, self.r[0,:,:], self.c[0,:,:]])
     
     def make_particle_array(self, parts_per_cell):  
         # Given the number of desired particles per cell, return an array in the 
@@ -244,6 +246,22 @@ class RTD_util(object):
     def get_budget(self, text):
         # Get the MODFLOW budget file for the time period specified by the MODPATH release date
         # and the MODFLOW start date. 
-        self.get_kstpkper()
+        self._get_kstpkper()
         budget = self.bud_obj.get_data(kstpkper=self.kstpkper, text=text, full3D=True)[0]
         self.budget = budget
+        
+    def _len_mult(self):
+        # the database values are in feet; if the model is in meters, 
+        # provide a multiplier to convert database values to match the model
+        lenuni_dict = {0: 'undefined units', 1: 'feet', 2: 'meters', 3: 'centimeters'}
+        self.len_unit = lenuni_dict[self.dis.lenuni]
+        if self.len_unit == 'meters':
+            self.len_mult = 0.3048006096012192
+        elif self.len_unit == 'feet':
+            self.len_mult = 1.0
+        else:
+            print('unknown length units')
+            self.len_mult = 1.0
+            
+    
+    

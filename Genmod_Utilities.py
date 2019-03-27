@@ -12,36 +12,44 @@ import osr
 
 class SourceProcessing(object):
     """
-    Geospatial functions for use with general model notebooks
+    Geospatial functions for use with rectangular grid finite-difference models. To properly
+    initialize, you must use either read_raster or create_model_grid.
     """
     
-    def __init__(self):
-        pass
+    def __init__(self, nodata=-9999):
+        self.nodata = nodata
         
     def read_raster(self, src_pth):
         assert os.path.exists(src_pth), 'raster source does not exist'
         self.src = gdal.Open(src_pth)
-        self.band = self.src.GetRasterBand(1)
-        self.data = self.band.ReadAsArray()  
+        band = self.src.GetRasterBand(1)
+        
+        self.nrow = int(self.src.RasterYSize)
+        self.ncol = int(self.src.RasterXSize)
         self.gt = self.src.GetGeoTransform()
-        self.prj = self.src.GetProjection()
-        self.ncol = self.src.RasterXSize
-        self.nrow = self.src.RasterYSize
+        self.output_raster_prj = self.src.GetProjection()
+        self.old_array = band.ReadAsArray()  
+        
         src = None
             
-    def create_model_grid(self, theta, origin, LX, LY):
-        # theta is rotation from positive x axis in radians
-        # origin is a tuple of projected coordinates of the upper left corner
-        # LX and LY are grid cell dimensions
+    def create_model_grid(self, theta, origin, LX, LY, nrow, ncol, output_raster_proj):
+        '''theta is rotation from positive x axis in radians
+        origin is a tuple of projected coordinates of the upper left corner
+        LX and LY are grid cell dimensions'''
         self.theta = theta
-        self.origin = origin
+        self.origin = origin      
         A = LX * np.cos(theta)
         B = LY * np.sin(theta)
         D = LX * np.sin(theta)
         E = LY * -np.cos(theta)
-        self.gt = [origin[0], A, B, origin[1], D, E]
         
-    def make_transforms(self):
+        self.nrow = int(nrow)
+        self.ncol = int(ncol)
+        self.gt = [origin[0], A, B, origin[1], D, E]
+        self.output_raster_prj = output_raster_proj
+        self.old_array = np.zeros((self.nrow, self.ncol))
+        
+    def _make_transforms(self):
         assert len(self.gt) == 6, 'geotransformation list must exist and have 6 elements'
         # format the geotransformation list into an affine transformation matrix))
         forward_transform = np.array(self.gt).reshape(2, -1)
@@ -51,6 +59,7 @@ class SourceProcessing(object):
         self.reverse_transform = np.linalg.inv(self.forward_transform)
         
     def prj_coords_to_array_coords(self, x, y):
+        _make_transforms()
         # reverse transform the real-world coordinate to pixel coordinates (row, column)
         assert x.shape[0] == y.shape[0], 'x and y have to have the same dimensions'
         ones = np.ones(x.shape[0])
@@ -59,14 +68,15 @@ class SourceProcessing(object):
         return wpp[1:,].T
         
     def array_coords_to_prj_coords(self, r, c):
-        # reverse transform cell-center coordinates to projected coordinates
+        _make_transforms()
+       # reverse transform cell-center coordinates to projected coordinates
         assert r.shape[0] == c.shape[0], 'r and c have to have the same dimensions'
         ones = np.ones(r.shape[0])
         wpts = np.column_stack((ones, c, r))
         dat = self.forward_transform.dot(wpts.T).T
         return dat[:, :-1]
 
-    def process_raster_data(self, method, NCOL, NROW, gt, shapeproj, hnoflo, conversion=1.0):
+    def process_raster_data(self, src, method, conversion=1.0):
         '''
         Takes a raster data source (ESRI grid, GeoTiff, .IMG and many other formats)
         and returns a numpy array. Arrangment of pixels is given as input and may 
@@ -104,75 +114,60 @@ class SourceProcessing(object):
         conversion : float
             factor to be applied to raw data values to change units
 
-        requires global variables (for now):
-        NCOL, NROW : number of rows and columns
-        gt : geotransform list
-        shapeproj : coordinate reference system of NHDPlus (or other desired projection)
-        hnoflo : to be used as missing data value (from model_spec.py)
-
         returns:
         2D array of raster data source projected onto model grid. 
         Returns a zero array with the correct shape if the source does not exist.
         '''
-        NCOL = int(NCOL)
-        NROW = int(NROW)
-        hnoflo = float(hnoflo)
         if os.path.exists(src):
             rast = gdal.Open(src)
-
-            dest = make_grid(NCOL, NROW, gt, shapeproj, hnoflo)
-            gdal.ReprojectImage(rast, dest, rast.GetProjection(), shapeproj, method)
-
+            dest = self._make_grid()
+            
+            gdal.ReprojectImage(rast, dest, rast.GetProjection(), self.output_raster_prj, method)
+ 
             grid = dest.GetRasterBand(1).ReadAsArray()
-
             grid = grid * conversion
 
             dest = None
             rast = None
+ 
         else:
-            grid = np.ones((NROW, NCOL)) * hnoflo
+            grid = np.ones((self.nrow, self.ncol)) * self.nodata
             print('Data not processed for\n{}\n Check that the file exists and path is correct'.format(src))
+            
+        self.new_array = grid
 
-        return grid
-
-    def process_vector_data(src, attribute, NCOL, NROW, gt, shapeproj, hnoflo):
+    def process_vector_data(self, src, attribute):
         '''
         Takes a vector data source (ESRI shapefile) and returns a numpy array.
-        Arrangment of pixels is given as input and may correspond to a MODFLOW grid.
+        Arrangement of pixels is given as input and may correspond to a MODFLOW grid.
 
         src : complete path to vector data source
         attribute : field in data table to assign to rasterized pixels
-        
-        requires global variables:
-        NCOL, NROW : number of rows and columns
-        gt : geotransform list
-        shapeproj : coordinate reference system of NHDPlus
-        hnoflo : to be used as missing data value (from model_spec.py)
         
         returns:
         2D array of vector data source projected onto model grid.
         Returns a zero array with the correct shape if the source does not exist.
         '''
         if os.path.exists(src):
-
             datasource = ogr.Open(src)
             layer = datasource.GetLayer()
 
-            src = make_grid(NCOL, NROW, gt, shapeproj, 0)
+            dest = self._make_grid()
             args = 'ATTRIBUTE={}'.format(attribute)
-            gdal.RasterizeLayer(src, [1], layer, options = [args])
+            gdal.RasterizeLayer(dest, [1], layer, options = [args])
 
-            grid = src.GetRasterBand(1).ReadAsArray()
+            grid = dest.GetRasterBand(1).ReadAsArray()
 
             src = None
-            dst = None        
+            dst = None      
+            
         else:
-            grid = np.ones((NROW, NCOL)) * hnoflo
+            grid = np.ones((self.nrow, self.ncol)) * self.nodata
             print('Data not processed for\n{}\n Check that the file exists and path is correct'.format(src))
+            
+        self.new_array = grid
 
-        return grid
-
-    def make_raster(dst_file, data, NCOL, NROW, gt, proj, nodata):
+    def write_raster(self, dst_file):
         '''
         Writes numpy array to a GeoTiff file.
         
@@ -194,15 +189,15 @@ class SourceProcessing(object):
         nodata : value to use as missing data in the GeoTiff
         '''
         driver = gdal.GetDriverByName("GTiff")
-        dst = driver.Create(dst_file, NCOL, NROW, 1, gdal.GDT_Float32)
-        dst.SetGeoTransform(gt)
-        dst.SetProjection(proj)
+        dst = driver.Create(dst_file, self.ncol, self.nrow, 1, gdal.GDT_Float32)
+        dst.SetGeoTransform(self.gt)
+        dst.SetProjection(self.output_raster_prj)
         band = dst.GetRasterBand(1)
-        band.SetNoDataValue(nodata)
-        band.WriteArray(data)
+        band.SetNoDataValue(self.nodata)
+        band.WriteArray(self.new_array)
         dst = None
 
-    def make_grid(NCOL, NROW, gt, proj, nodata):  # NOTE: in NB1_v3 nodata defaults to hnoflow; here, it must be provided
+    def _make_grid(self):  
         '''
         Creates a blank raster image in memory.
             
@@ -218,67 +213,20 @@ class SourceProcessing(object):
             E = distance from C along y axis to lower left pixel corner of the upper left pixel
             D = distance from C along y axis to upper right pixel corner of the upper left pixel
             
-        proj : projection of the GeoTiff
+        shapeproj : projection of the GeoTiff
         nodata : value to use as missing data in the GeoTiff
         '''
         mem_drv = gdal.GetDriverByName('MEM')
-        grid_ras = mem_drv.Create('', NCOL, NROW, 1, gdal.GDT_Float32)
-        grid_ras.SetGeoTransform(gt)
-        grid_ras.SetProjection(proj)
+        grid_ras = mem_drv.Create('', self.ncol, self.nrow, 1, gdal.GDT_Float32)
+        grid_ras.SetGeoTransform(self.gt)
+        grid_ras.SetProjection(self.output_raster_prj)
         band = grid_ras.GetRasterBand(1)
-        band.SetNoDataValue(nodata)
-        array = np.zeros((NROW,NCOL))
-        band.WriteArray(array)
+        band.SetNoDataValue(self.nodata)
+        self.new_array = np.zeros((self.nrow, self.ncol))
+        band.WriteArray(self.new_array)
         return grid_ras
-
-    def process_mohp_data(tif_files):
-        '''
-        Loops a list of MOHP tif files. The rest of the algorithm is similar to the function
-        "process_raster_data" except that a transformation from the ESRI WKT format to a generic
-        format is needed. When MOHP data source is finalized, this function can be modified
-        to work with the final format.
-        
-        src : complete path to raster data source
-        method : gdal method for interpolation
-        conversion : factor to be applied to raw data values to change units
-
-        requires global variables (for now):
-        NCOL, NROW : number of rows and columns
-        gt : geotransform list
-        shapeproj : coordinate reference system of NHDPlus (or other desired projection)
-        hnoflo : to be used as missing data value (from model_spec.py)
-
-        returns:
-        2D array of raster data source projected onto model grid. Each column contains
-        a different stream order MOHP. Each row corresponds to a model cell. 
-        Number of rows is NCOL x NCOL. Number of columns is number of stream orders present.
-        '''
-        
-        arr = np.zeros((NCOL * NROW, len(tif_files)))
-        if tif_files != []:
-            for col, src in enumerate(tif_files):
-                hp = gdal.Open(src)
-
-                dest = make_grid(NCOL, NROW, gt, shapeproj)
-
-                srs = osr.SpatialReference()
-                srs.ImportFromWkt(hp.GetProjection())
-                srs.MorphFromESRI()
-                hp_prj = srs.ExportToWkt()
-                hp.SetProjection(hp_prj)
-
-                gdal.ReprojectImage(hp, dest, hp.GetProjection(), shapeproj, gdal.GRA_NearestNeighbour)
-
-                hp_grd = dest.GetRasterBand(1).ReadAsArray()
-                hp_grd = hp_grd / 10000.
-
-                dst = None
-                hp = None
-                
-                arr[:, col] = hp_grd.ravel()
-        return arr
-
-    def make_clockwise(coords):
+ 
+    def make_clockwise(self, coords):
         '''
         Function to determine direction of vertices of a polygon (clockwise or CCW).
         Probably not needed, but here just in case. 
@@ -316,7 +264,7 @@ class SourceProcessing(object):
     # print( c)
 
 
-    def dbf2df(dbf_path, index=None, cols=False, incl_index=False):
+    def dbf2df(self, dbf_path, index=None, cols=False, incl_index=False):
         '''
         Read a dbf file as a pandas.DataFrame, optionally selecting the index
         variable and which columns are to be loaded.
