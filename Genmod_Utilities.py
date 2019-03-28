@@ -1,3 +1,6 @@
+import matplotlib.pyplot as plt
+import osr
+import ogr
 import pysal as ps
 import numpy as np
 import pandas as pd
@@ -6,80 +9,185 @@ import ast
 from shutil import copyfile
 import gdal
 gdal.UseExceptions()
-import ogr
-import osr
-import matplotlib.pyplot as plt
 
 
 class SourceProcessing(object):
-    """
+    '''
     Geospatial functions for use with rectangular grid finite-difference models. To properly
     initialize, you must use either read_raster or create_model_grid. 
-    
+
+    Parameters
+    ----------
+    nodata: (float, int, or np.nan)
+        Set the value to be as no data for both input and output
+
     Attributes
-        old_array:
-            The array that is read as part of the input raster, or, if a new raster is created
-            rather being read in, an array of zeros.
-        new_array:
-            The array that is produced by either rasterizing vector data or resampling and 
-            reprojecting raster data.  New_array has the same spatial position as old_array. 
-            of old_array            
-    """
+    ----------
+    old_array : array (nrow, ncol)
+        The numpy array that is either read as part of the input raster (read_raster), or, 
+        if a new raster is created rather being read in, an array of zeros (create_model_grid).
+    new_array : array (nrow, ncol)
+        The array that is produced by either rasterizing vector data or resampling and 
+        reprojecting raster data.  new_array has the same spatial attributes as old_array. 
+    ncol, nrow : ints
+        number of rows and columns. These may coincide with a MODFLOW grid.
+    gt : list of floats
+        6-element geotransform list [C, A, B, F, E, D]. 
+    put_raster_prj: WKT format
+        projected coordinate system for output in Well-Known Text format (e.g. shapefile *.prj file)
+    nodata : int or float or np.nan
+        value to use as missing data in the output raster
+        
+    Methods
+    -------
+    read_raster(src_pth)
+        Reads an exisiting raster.
+    create_model_grid(theta, origin, LX, LY, nrow, ncol, output_raster_proj)
+        Creates a blank model grid in memory.
+    prj_coords_to_array_coords(x, y)
+        Transforms coordinates.
+    array_coords_to_prj_coords(r, c)
+        Transforms coordinates.
+    process_raster_data(src, method, conversion=1.0)
+        Interpolates raster data on to model grid.
+    process_vector_data(src, method, conversion=1.0)
+        Interpolate vector data on to model grid.
+    write_raster(dst_file)
+        Writes an array to a GeoTiff file.
+    plot_raster(which_raster='old')
+        Plots a raster image in real-world coordinates
+    make_clockwise(coords)
+        Detects a counterclockwise polygon and reverses it.
+    dbf2df(dbf_path, index=None, cols=False, incl_index=False)
+        Reads a dbf file into a Pandas DataFrame
+        
+    Notes
+    -----
+    Geotransform list gives the coordinates of each pixel from the upper left pixel.
+    If there is no rotation, B=D=0. If cells are square, A=-E.   
+    Letter designations come from the original GDAL documentation.
+
+    C = x coordinate in map units of the upper left corner of the upper left pixel
+    A = distance from C along x axis to upper right pixel corner of the upper left pixel
+    B = distance from C along x axis to lower left pixel corner of the upper left pixel,
+    F = y coordinate in map units of the upper left corner of the upper left pixel
+    E = distance from C along y axis to lower left pixel corner of the upper left pixel
+    D = distance from C along y axis to upper right pixel corner of the upper left pixel
     
+    Returns
+    -------
+    SourceProcessing instance
+    '''
+
     def __init__(self, nodata=-9999):
         self.nodata = nodata
-        
+
     def read_raster(self, src_pth):
+        '''
+        Reads an exisiting raster that can be used 
+        1. to simply plot the image in real world coordinates,
+        2. as a model-grid template for populating the grid with new information, and 
+        3. to supply the information needed to transform both ways between a set of 
+           model (row, col) coordinates and real-world coordinates.
+
+        Parameters
+        ----------
+        src_pth: str
+            Relative or absolute path, including file name, to a valid data source.
+            Valid sources include shapefiles, GeoTiff, and ESRI Grid formats, and many more'''
         assert os.path.exists(src_pth), 'raster source does not exist'
         self.src = gdal.Open(src_pth)
         band = self.src.GetRasterBand(1)
-        
+
         self.nrow = int(self.src.RasterYSize)
         self.ncol = int(self.src.RasterXSize)
         self.gt = self.src.GetGeoTransform()
         self.output_raster_prj = self.src.GetProjection()
-        self.old_array = band.ReadAsArray()  
-        
+        self.old_array = band.ReadAsArray()
+
         src = None
-            
+
     def create_model_grid(self, theta, origin, LX, LY, nrow, ncol, output_raster_proj):
-        '''theta is rotation from positive x axis in radians
-        origin is a tuple of projected coordinates of the upper left corner
-        LX and LY are grid cell dimensions'''
+        '''
+        Creates a new blank raster that can be used 1. as a model-grid template for populating 
+        the grid with new information, and 2. to supply the information needed to transform 
+        between a set of model (row, col) coordinates and real-world coordinates.
+
+        Parameters
+        ----------
+        theta: float
+            counterclockwise rotation from positive x axis in radians
+        origin: tuple of floats
+            projected coordinates of the upper left corner
+        LX, LY: floats
+            grid cell dimensions (pixel size) in x and y 
+        nrow, ncol: floats
+            number of cells (pixels in each dirction)
+        output_raster_prj: WKT format
+            projected coordinate system for output in Well-Known Text format (e.g. shapefile *.prj file)'''
         self.theta = theta
-        self.origin = origin      
+        self.origin = origin
         A = LX * np.cos(theta)
         B = LY * np.sin(theta)
         D = LX * np.sin(theta)
         E = LY * -np.cos(theta)
-        
+
         self.nrow = int(nrow)
         self.ncol = int(ncol)
         self.gt = [origin[0], A, B, origin[1], D, E]
         self.output_raster_prj = output_raster_proj
         self.old_array = np.zeros((self.nrow, self.ncol))
-        
+
     def _make_transforms(self):
-        assert len(self.gt) == 6, 'geotransformation list must exist and have 6 elements'
+        # make sure the gt list has been created
+        assert isinstance(
+            self.gt, list), 'Make sure either read_raster or create_model_grid has been run first'
         # format the geotransformation list into an affine transformation matrix))
         forward_transform = np.array(self.gt).reshape(2, -1)
         # add a row to get homogeneous coodinates (offsets are in the first column)
         self.forward_transform = np.vstack((forward_transform, [1, 0, 0]))
         # invert the forward transform
         self.reverse_transform = np.linalg.inv(self.forward_transform)
-        
+
     def prj_coords_to_array_coords(self, x, y):
+        '''
+        Transform real-world coordinates to model grid coordinates (row, column). 
+
+        Parameters
+        ----------
+        x, y: arrays of floats, one each for x and y (n, 1)
+            real-world coordinates in whatever system the model grid is in
+
+        Returns
+        -------
+        array : (n, 2)
+            row and col coordinates. Integer portion is the zero-based row or column;
+            decimal portion is the relative coordinate within a cell (0 to 1). 
+            Row coordinate increases from top (row 0) to bottom (last row). 
+        '''
+
         self._make_transforms()
-        # reverse transform the real-world coordinate to pixel coordinates (row, column)
         assert x.shape[0] == y.shape[0], 'x and y have to have the same dimensions'
         ones = np.ones(x.shape[0])
         wpts = np.column_stack((x, y, ones))
         wpp = self.reverse_transform.dot(wpts.T)
-        return wpp[1:,].T
-        
+        return wpp[1:, ].T
+
     def array_coords_to_prj_coords(self, r, c):
+        '''
+        Transform model grid (row, col) coordinates to real-world coordinates
+
+        Parameters
+        ----------
+        r, c: arrays of floats, one each for row and col (n, 1)
+            real-world coordinates in whatever system the model grid is in
+
+        Returns
+        -------
+        array : (n, 2) 
+            x and y real-world coordinates
+        '''
         self._make_transforms()
-       # reverse transform cell-center coordinates to projected coordinates
         assert r.shape[0] == c.shape[0], 'r and c have to have the same dimensions'
         ones = np.ones(r.shape[0])
         wpts = np.column_stack((ones, c, r))
@@ -89,74 +197,90 @@ class SourceProcessing(object):
     def process_raster_data(self, src, method, conversion=1.0):
         '''
         Takes a raster data source (ESRI grid, GeoTiff, .IMG and many other formats)
-        and returns a numpy array. Arrangment of pixels is given as input and may 
+        and returns a numpy array. Arrangement of pixels is given as input and may 
         correspond to a MODFLOW grid.
-        
-        src : string
+
+        Parameters
+        ----------
+        src : str
             complete path to raster data source
-        method : string
-            gdal method for interpolation. Choices are:
-                gdal.GRA_NearestNeighbour 
-                    Nearest neighbour (select on one input pixel)
-                gdal.GRA_Bilinear
-                    Bilinear (2x2 kernel)
-                gdal.GRA_Cubic
-                    Cubic Convolution Approximation (4x4 kernel)
-                gdal.GRA_CubicSpline
-                    Cubic B-Spline Approximation (4x4 kernel)
-                gdal.GRA_Lanczos
-                    Lanczos windowed sinc interpolation (6x6 kernel)
-                gdal.GRA_Average
-                    Average (computes the average of all non-NODATA contributing pixels)
-                gdal.GRA_Mode
-                    Mode (selects the value which appears most often of all the sampled points)
-                gdal.GRA_Max
-                    Max (selects maximum of all non-NODATA contributing pixels)
-                gdal.GRA_Min
-                    Min (selects minimum of all non-NODATA contributing pixels)
-                gdal.GRA_Med
-                    Med (selects median of all non-NODATA contributing pixels)
-                gdal.GRA_Q1
-                    Q1 (selects first quartile of all non-NODATA contributing pixels)
-                gdal.GRA_Q3
-                    Q3 (selects third quartile of all non-NODATA contributing pixels)
-
+        method : str
+            gdal method for interpolation. See notes.
         conversion : float
-            factor to be applied to raw data values to change units
+            factor to be applied to raw data values, for eaxmple to change units
 
-        returns:
-        2D array of raster data source projected onto model grid. 
-        Returns a zero array with the correct shape if the source does not exist.
+        Returns
+        -------
+        array : (nrow, ncol)
+            Raster data source projected onto model grid. Returns a zero array with the 
+            correct shape if the source does not exist.
+            
+        Notes
+        -----
+        Choices for method are (not all may be available depending on version)      
+            gdal.GRA_NearestNeighbour 
+                Nearest neighbour (select on one input pixel)
+            gdal.GRA_Bilinear
+                Bilinear (2x2 kernel)
+            gdal.GRA_Cubic
+                Cubic Convolution Approximation (4x4 kernel)
+            gdal.GRA_CubicSpline
+                Cubic B-Spline Approximation (4x4 kernel)
+            gdal.GRA_Lanczos
+                Lanczos windowed sinc interpolation (6x6 kernel)
+            gdal.GRA_Average
+                Average (computes the average of all non-NODATA contributing pixels)
+            gdal.GRA_Mode
+                Mode (selects the value which appears most often of all the sampled points)
+            gdal.GRA_Max
+                Max (selects maximum of all non-NODATA contributing pixels)
+            gdal.GRA_Min
+                Min (selects minimum of all non-NODATA contributing pixels)
+            gdal.GRA_Med
+                Med (selects median of all non-NODATA contributing pixels)
+            gdal.GRA_Q1
+                Q1 (selects first quartile of all non-NODATA contributing pixels)
+            gdal.GRA_Q3
+                Q3 (selects third quartile of all non-NODATA contributing pixels)
+
         '''
         if os.path.exists(src):
             rast = gdal.Open(src)
             dest = self._make_grid()
-            
-            gdal.ReprojectImage(rast, dest, rast.GetProjection(), self.output_raster_prj, method)
- 
+
+            gdal.ReprojectImage(rast, dest, rast.GetProjection(),
+                                self.output_raster_prj, method)
+
             grid = dest.GetRasterBand(1).ReadAsArray()
             grid = grid * conversion
 
             dest = None
             rast = None
- 
+
         else:
             grid = np.ones((self.nrow, self.ncol)) * self.nodata
-            print('Data not processed for\n{}\n Check that the file exists and path is correct'.format(src))
-            
+            print(
+                'Data not processed for\n{}\n Check that the file exists and path is correct'.format(src))
+
         self.new_array = grid
 
     def process_vector_data(self, src, attribute):
         '''
-        Takes a vector data source (ESRI shapefile) and returns a numpy array.
+        Takes a vector data source (e.g. ESRI shapefile) and returns a numpy array.
         Arrangement of pixels is given as input and may correspond to a MODFLOW grid.
 
-        src : complete path to vector data source
-        attribute : field in data table to assign to rasterized pixels
-        
-        returns:
-        2D array of vector data source projected onto model grid.
-        Returns a zero array with the correct shape if the source does not exist.
+        Parameters
+        ----------
+        src : str
+            complete path to vector data source
+        attribute : str
+            field in data table to assign to rasterized pixels
+
+        Returns
+        -------
+        array : (nrow, ncol)
+            Vector data source projected onto model grid. Returns a zero array 
+            with the correct shape if the source does not exist.
         '''
         if os.path.exists(src):
             datasource = ogr.Open(src)
@@ -164,42 +288,32 @@ class SourceProcessing(object):
 
             dest = self._make_grid()
             args = 'ATTRIBUTE={}'.format(attribute)
-            gdal.RasterizeLayer(dest, [1], layer, options = [args])
+            gdal.RasterizeLayer(dest, [1], layer, options=[args])
 
             grid = dest.GetRasterBand(1).ReadAsArray()
 
             src = None
-            dst = None      
-            
+            dst = None
+
         else:
             grid = np.ones((self.nrow, self.ncol)) * self.nodata
-            print('Data not processed for\n{}\n Check that the file exists and path is correct'.format(src))
-            
+            print(
+                'Data not processed for\n{}\n Check that the file exists and path is correct'.format(src))
+
         self.new_array = grid
 
     def write_raster(self, dst_file):
         '''
-        Writes numpy array to a GeoTiff file.
-        
-        dst_file : name of file to write
-        data : 2D numpy array
-        NCOL, NROW : number of rows and columns. These may coincide with a MODFLOW grid.
-        gt : 6-element geotransform list [C, A, B, F, E, D]. Gives the coordinates of one pixel
-            (the upper left pixel). If there is no rotation, B=D=0. If cells are square, A=-E.   
-            Letter designations come from the original documentation.
-            
-            C = x coordinate in map units of the upper left corner of the upper left pixel
-            A = distance from C along x axis to upper right pixel corner of the upper left pixel
-            B = distance from C along x axis to lower left pixel corner of the upper left pixel,
-            F = y coordinate in map units of the upper left corner of the upper left pixel
-            E = distance from C along y axis to lower left pixel corner of the upper left pixel
-            D = distance from C along y axis to upper right pixel corner of the upper left pixel
-            
-        proj : projection of the GeoTiff
-        nodata : value to use as missing data in the GeoTiff
+        Writes a numpy array to a GeoTiff file.
+
+        Parameters
+        ----------
+        dst_file : str
+            path name of file to write
         '''
         driver = gdal.GetDriverByName("GTiff")
-        dst = driver.Create(dst_file, self.ncol, self.nrow, 1, gdal.GDT_Float32)
+        dst = driver.Create(dst_file, self.ncol,
+                            self.nrow, 1, gdal.GDT_Float32)
         dst.SetGeoTransform(self.gt)
         dst.SetProjection(self.output_raster_prj)
         band = dst.GetRasterBand(1)
@@ -207,27 +321,13 @@ class SourceProcessing(object):
         band.WriteArray(self.new_array)
         dst = None
 
-    def _make_grid(self):  
+    def _make_grid(self):
         '''
         Creates a blank raster image in memory.
-            
-        NCOL, NROW : number of rows and columns. These may coincide with a MODFLOW grid.
-        gt : 6-element geotransform list [C, A, B, F, E, D]. Gives the coordinates of one pixel
-            (the upper left pixel). If there is no rotation, B=D=0. If cells are square, A=-E.   
-            Letter designations come from the original documentation.
-            
-            C = x coordinate in map units of the upper left corner of the upper left pixel
-            A = distance from C along x axis to upper right pixel corner of the upper left pixel
-            B = distance from C along x axis to lower left pixel corner of the upper left pixel,
-            F = y coordinate in map units of the upper left corner of the upper left pixel
-            E = distance from C along y axis to lower left pixel corner of the upper left pixel
-            D = distance from C along y axis to upper right pixel corner of the upper left pixel
-            
-        shapeproj : projection of the GeoTiff
-        nodata : value to use as missing data in the GeoTiff
         '''
         mem_drv = gdal.GetDriverByName('MEM')
-        grid_ras = mem_drv.Create('', self.ncol, self.nrow, 1, gdal.GDT_Float32)
+        grid_ras = mem_drv.Create(
+            '', self.ncol, self.nrow, 1, gdal.GDT_Float32)
         grid_ras.SetGeoTransform(self.gt)
         grid_ras.SetProjection(self.output_raster_prj)
         band = grid_ras.GetRasterBand(1)
@@ -235,31 +335,35 @@ class SourceProcessing(object):
         self.new_array = np.zeros((self.nrow, self.ncol))
         band.WriteArray(self.new_array)
         return grid_ras
- 
+
     def plot_raster(self, which_raster='old'):
         '''
-        Parameters:
-            which_raster: (str)
-               valid values are 'old' to plot a raster that was read in
-               with read_raster; 'new' will plot the newly
-               created raster
-        
-        Returns:
-            fig, ax'''
+        Parameters
+        ----------
+        which_raster: str
+           valid values are 'old' to plot a raster that was read in
+           with read_raster; 'new' will plot the newly created raster
+
+        Returns
+        -------
+        matplotlib figure instance
+            fig, ax
+        '''
         r, c = np.indices((self.nrow + 1, self.ncol + 1))
         r, c = r.ravel(), c.ravel()
         x, y = self.array_coords_to_prj_coords(r, c).T
-        
+
         x = x.reshape(self.nrow + 1, self.ncol + 1)
         y = y.reshape(self.nrow + 1, self.ncol + 1)
-        
+
         fig, ax = plt.subplots(1, 1)
         if which_raster == 'old':
             ax.pcolormesh(x, y, self.old_array)
         elif which_raster == 'new':
             ax.pcolormesh(x, y, self.new_array)
         else:
-            raise Exception("which_raster has to be 'old' or 'new'. \n You entered {}".format(which_raster))
+            raise Exception(
+                "which_raster has to be 'old' or 'new'. \n You entered {}".format(which_raster))
         ax.set_aspect(1)
         return fig, ax
 
@@ -267,10 +371,12 @@ class SourceProcessing(object):
         '''
         Function to determine direction of vertices of a polygon (clockwise or CCW).
         Probably not needed, but here just in case. 
-        
-        coords : array with dim (n, 2)
-                n is number of vertices in the polygon. The last vertex is the same 
-                as the first to close the polygon. The first column is x and the second is y.
+
+        Parameters
+        ----------
+        coords : array (n, 2)
+            n is number of vertices in the polygon. The last vertex is the same 
+            as the first to close the polygon. The first column is x and the second is y.
         '''
         # if the points are counterclockwise, reverse them
         x1 = coords[:-1, 0]
@@ -300,7 +406,6 @@ class SourceProcessing(object):
     # c = make_clockwise(coords)
     # print( c)
 
-
     def dbf2df(self, dbf_path, index=None, cols=False, incl_index=False):
         '''
         Read a dbf file as a pandas.DataFrame, optionally selecting the index
@@ -309,23 +414,23 @@ class SourceProcessing(object):
         __author__  = "Dani Arribas-Bel <darribas@asu.edu> "
         ...
 
-        Arguments
-        ---------
-        dbf_path    : str
-                      Path to the DBF file to be read
-        index       : str
-                      Name of the column to be used as the index of the DataFrame
-        cols        : list
-                      List with the names of the columns to be read into the
-                      DataFrame. Defaults to False, which reads the whole dbf
-        incl_index  : Boolean
-                      If True index is included in the DataFrame as a
-                      column too. Defaults to False
+        Parameters
+        ----------
+        dbf_path : str
+            Path to the DBF file to be read
+        index : str
+            Name of the column to be used as the index of the DataFrame
+        cols : list
+            List with the names of the columns to be read into the
+            DataFrame. Defaults to False, which reads the whole dbf
+        incl_index : Boolean
+            If True index is included in the DataFrame as a
+            column too. Defaults to False
 
         Returns
         -------
-        df          : DataFrame
-                      pandas.DataFrame object created
+        df : DataFrame
+            pandas DataFrame 
         '''
         db = ps.open(dbf_path)
         if cols:
@@ -342,4 +447,3 @@ class SourceProcessing(object):
         else:
             db.close()
             return pd.DataFrame(data)
-
