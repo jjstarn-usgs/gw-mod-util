@@ -264,7 +264,7 @@ class SourceProcessing(object):
 
         self.new_array = grid
 
-    def process_vector_data(self, src, attribute):
+    def process_vector_data(self, src, attribute, layer=0):
         '''
         Takes a vector data source (e.g. ESRI shapefile) and returns a numpy array.
         Arrangement of pixels is given as input and may correspond to a MODFLOW grid.
@@ -284,7 +284,7 @@ class SourceProcessing(object):
         '''
         if os.path.exists(src):
             datasource = ogr.Open(src)
-            layer = datasource.GetLayer()
+            layer = datasource.GetLayer(iLayer=layer)
 
             dest = self._make_grid()
             args = 'ATTRIBUTE={}'.format(attribute)
