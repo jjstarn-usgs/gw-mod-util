@@ -33,7 +33,7 @@ class SourceProcessing(object):
         number of rows and columns. These may coincide with a MODFLOW grid.
     gt : list of floats
         6-element geotransform list [C, A, B, F, E, D]. 
-    put_raster_prj: WKT format
+    output_raster_prj: WKT format
         projected coordinate system for output in Well-Known Text format (e.g. shapefile *.prj file)
     nodata : int or float or np.nan
         value to use as missing data in the output raster
