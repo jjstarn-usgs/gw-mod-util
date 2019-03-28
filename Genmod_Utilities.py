@@ -236,8 +236,16 @@ class SourceProcessing(object):
         band.WriteArray(self.new_array)
         return grid_ras
  
-    def plot_raster(self):
-        '''Returns fig, ax'''
+    def plot_raster(self, which_raster='old'):
+        '''
+        Parameters:
+            which_raster: (str)
+               valid values are 'old' to plot a raster that was read in
+               with read_raster; 'new' will plot the newly
+               created raster
+        
+        Returns:
+            fig, ax'''
         r, c = np.indices((self.nrow + 1, self.ncol + 1))
         r, c = r.ravel(), c.ravel()
         x, y = self.array_coords_to_prj_coords(r, c).T
@@ -246,7 +254,12 @@ class SourceProcessing(object):
         y = y.reshape(self.nrow + 1, self.ncol + 1)
         
         fig, ax = plt.subplots(1, 1)
-        ax.pcolormesh(x, y, self.old_array)
+        if which_raster == 'old':
+            ax.pcolormesh(x, y, self.old_array)
+        elif which_raster == 'new':
+            ax.pcolormesh(x, y, self.new_array)
+        else:
+            raise Exception("which_raster has to be 'old' or 'new'. \n You entered {}".format(which_raster))
         ax.set_aspect(1)
         return fig, ax
 
