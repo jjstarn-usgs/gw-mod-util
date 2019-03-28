@@ -8,12 +8,22 @@ import gdal
 gdal.UseExceptions()
 import ogr
 import osr
+import matplotlib.pyplot as plt
 
 
 class SourceProcessing(object):
     """
     Geospatial functions for use with rectangular grid finite-difference models. To properly
-    initialize, you must use either read_raster or create_model_grid.
+    initialize, you must use either read_raster or create_model_grid. 
+    
+    Attributes
+        old_array:
+            The array that is read as part of the input raster, or, if a new raster is created
+            rather being read in, an array of zeros.
+        new_array:
+            The array that is produced by either rasterizing vector data or resampling and 
+            reprojecting raster data.  New_array has the same spatial position as old_array. 
+            of old_array            
     """
     
     def __init__(self, nodata=-9999):
@@ -59,7 +69,7 @@ class SourceProcessing(object):
         self.reverse_transform = np.linalg.inv(self.forward_transform)
         
     def prj_coords_to_array_coords(self, x, y):
-        _make_transforms()
+        self._make_transforms()
         # reverse transform the real-world coordinate to pixel coordinates (row, column)
         assert x.shape[0] == y.shape[0], 'x and y have to have the same dimensions'
         ones = np.ones(x.shape[0])
@@ -68,7 +78,7 @@ class SourceProcessing(object):
         return wpp[1:,].T
         
     def array_coords_to_prj_coords(self, r, c):
-        _make_transforms()
+        self._make_transforms()
        # reverse transform cell-center coordinates to projected coordinates
         assert r.shape[0] == c.shape[0], 'r and c have to have the same dimensions'
         ones = np.ones(r.shape[0])
@@ -226,6 +236,20 @@ class SourceProcessing(object):
         band.WriteArray(self.new_array)
         return grid_ras
  
+    def plot_raster(self):
+        '''Returns fig, ax'''
+        r, c = np.indices((self.nrow + 1, self.ncol + 1))
+        r, c = r.ravel(), c.ravel()
+        x, y = self.array_coords_to_prj_coords(r, c).T
+        
+        x = x.reshape(self.nrow + 1, self.ncol + 1)
+        y = y.reshape(self.nrow + 1, self.ncol + 1)
+        
+        fig, ax = plt.subplots(1, 1)
+        ax.pcolormesh(x, y, self.old_array)
+        ax.set_aspect(1)
+        return fig, ax
+
     def make_clockwise(self, coords):
         '''
         Function to determine direction of vertices of a polygon (clockwise or CCW).

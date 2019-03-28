@@ -13,7 +13,7 @@ class Model(object):
         the  grid_search meethod. Cross-validation is also available.
         
         Parameters:
-        model: XGRegressor model from the XGBoost Scikit-Learnb API
+        model: XGRegressor model from the XGBoost Scikit-Learn API
         features: pandas DataFrame
             Explanatory features are in columns
         labels: pandas DataFrame 
