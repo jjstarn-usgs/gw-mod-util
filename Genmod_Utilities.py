@@ -134,14 +134,14 @@ class SourceProcessing(object):
 
         self.nrow = int(nrow)
         self.ncol = int(ncol)
-        self.gt = [origin[0], A, B, origin[1], D, E]
+        self.gt = (origin[0], A, B, origin[1], D, E)
         self.output_raster_prj = output_raster_proj
         self.old_array = np.zeros((self.nrow, self.ncol))
 
     def _make_transforms(self):
         # make sure the gt list has been created
         assert isinstance(
-            self.gt, list), 'Make sure either read_raster or create_model_grid has been run first'
+            self.gt, tuple), 'Make sure either read_raster or create_model_grid has been run first'
         # format the geotransformation list into an affine transformation matrix))
         forward_transform = np.array(self.gt).reshape(2, -1)
         # add a row to get homogeneous coodinates (offsets are in the first column)
