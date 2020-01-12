@@ -222,9 +222,8 @@ def fit_dists(ly, lprt, dist_list):
     return {'cdf' : cdf_dict, 'par' : param_dict, 'err' : error_dict, 'tt' : tt_dict}
     
 def read_endpoints(endpoint_file, dis):
-    import pandas as pd
-	
-	# setup dictionaries of the MODFLOW units for proper labeling of figures.
+    # read MODPATH 6 endpoint file
+    # setup dictionaries of the MODFLOW units for proper labeling of figures.
     lenunit = {0:'undefined units', 1:'feet', 2:'meters', 3:'centimeters'}
     timeunit = {0:'undefined', 1:'second', 2:'minute', 3:'hour', 4:'day', 5:'year'}
     

@@ -1,11 +1,10 @@
 import matplotlib.pyplot as plt
 import osr
 import ogr
-import pysal as ps
 import numpy as np
 import pandas as pd
 import os
-import ast
+# import ast
 from shutil import copyfile
 import gdal
 gdal.UseExceptions()
@@ -13,8 +12,14 @@ gdal.UseExceptions()
 
 class SourceProcessing(object):
     '''
-    Geospatial functions for use with rectangular grid finite-difference models. To properly
-    initialize, you must use either read_raster or create_model_grid. 
+    Geospatial functions for use with rectangular grid finite-difference models. The purpose
+    of this class is to populate a raster grid (in GeoTiff format) with new information, 
+    although it may also be useful for reading, extracting, and diplaying grids from existing 
+    GeoTiffs. To properly initialize this class, you must use either read_raster or create_raster
+    to create the initial raster grid ("old_array"). The "new_array" is optional, and it can be
+    created by scaling and sampling an existing raster, by rasterizing an existing vector data
+    layer, or by simply assigning an existing numpy grid (with the same dimensions as the 
+    starting raster) to either old_array or new_array.
 
     Parameters
     ----------
@@ -105,9 +110,12 @@ class SourceProcessing(object):
         self.output_raster_prj = self.src.GetProjection()
         self.old_array = band.ReadAsArray()
 
-        src = None
+        self.src = None
+        
+        self._get_coordinates()
+        self._make_transforms()
 
-    def create_model_grid(self, theta, origin, LX, LY, nrow, ncol, output_raster_proj):
+    def create_raster(self, theta, origin, LX, LY, nrow, ncol, output_raster_proj):
         '''
         Creates a new blank raster that can be used 1. as a model-grid template for populating 
         the grid with new information, and 2. to supply the information needed to transform 
@@ -137,6 +145,9 @@ class SourceProcessing(object):
         self.gt = (origin[0], A, B, origin[1], D, E)
         self.output_raster_prj = output_raster_proj
         self.old_array = np.zeros((self.nrow, self.ncol))
+        
+        self._get_coordinates()
+        self._make_transforms()
 
     def _make_transforms(self):
         # make sure the gt list has been created
@@ -217,7 +228,7 @@ class SourceProcessing(object):
             
         Notes
         -----
-        Choices for method are (not all may be available depending on version)      
+        Choices for method are (not all may be available depending on version of gdal)      
             gdal.GRA_NearestNeighbour 
                 Nearest neighbour (select on one input pixel)
             gdal.GRA_Bilinear
@@ -302,7 +313,7 @@ class SourceProcessing(object):
 
         self.new_array = grid
 
-    def write_raster(self, dst_file):
+    def write_raster(self, dst_file, which_raster='old'):
         '''
         Writes a numpy array to a GeoTiff file.
 
@@ -318,7 +329,13 @@ class SourceProcessing(object):
         dst.SetProjection(self.output_raster_prj)
         band = dst.GetRasterBand(1)
         band.SetNoDataValue(self.nodata)
-        band.WriteArray(self.new_array)
+        if which_raster == 'old':
+            band.WriteArray(self.old_array)
+        elif which_raster == 'new':
+            band.WriteArray(self.new_array)
+        else:
+            raise Exception(
+                "which_raster has to be 'old' or 'new'. \n You entered {}".format(which_raster))
         dst = None
 
     def _make_grid(self):
@@ -335,37 +352,61 @@ class SourceProcessing(object):
         self.new_array = np.zeros((self.nrow, self.ncol))
         band.WriteArray(self.new_array)
         return grid_ras
+        
+    def _get_coordinates(self):
+        '''
+        Computes the x and y coordinates for pixels at the edges of
+        cells (for pcolormesh and other plotting routines) and at the
+        center of cells (for contourf). The row and column attributes
+        (r and c) are for cell centers where the upper left cell is 
+        at (0.5, 0.5) and the bottom right cell is at (nrow - 0.5, ncol - 0.5)
+        '''
+        self.r, self.c = np.indices((self.nrow, self.ncol)) + 0.5
+        r, c = self.r.ravel(), self.c.ravel()
+        x, y = self.array_coords_to_prj_coords(r, c).T
 
-    def plot_raster(self, which_raster='old'):
+        self.x_center = x.reshape(self.nrow, self.ncol)
+        self.y_center = y.reshape(self.nrow, self.ncol)
+        
+        re, ce = np.indices((self.nrow + 1, self.ncol + 1))
+        re, ce = re.ravel(), ce.ravel()
+        x, y = self.array_coords_to_prj_coords(re, ce).T
+
+        self.x_edge = x.reshape(self.nrow + 1, self.ncol + 1)
+        self.y_edge = y.reshape(self.nrow + 1, self.ncol + 1)
+
+    def plot_raster(self, which_raster='old', plot=True, sk={'figsize':(5,5)}, pk={'cmap':plt.cm.coolwarm}, ck={'shrink':0.5}):
         '''
         Parameters
         ----------
         which_raster: str
            valid values are 'old' to plot a raster that was read in
            with read_raster; 'new' will plot the newly created raster
+        sk : dictionary
+           keywords to add to subplots
+        pk : dictionary
+           keywords to add to pcolormesh
+        ck : dictionary
+           keywords to add to colorbar
 
         Returns
         -------
         matplotlib figure instance
             fig, ax
         '''
-        r, c = np.indices((self.nrow + 1, self.ncol + 1))
-        r, c = r.ravel(), c.ravel()
-        x, y = self.array_coords_to_prj_coords(r, c).T
-
-        x = x.reshape(self.nrow + 1, self.ncol + 1)
-        y = y.reshape(self.nrow + 1, self.ncol + 1)
-
-        fig, ax = plt.subplots(1, 1)
-        if which_raster == 'old':
-            ax.pcolormesh(x, y, self.old_array)
-        elif which_raster == 'new':
-            ax.pcolormesh(x, y, self.new_array)
-        else:
-            raise Exception(
-                "which_raster has to be 'old' or 'new'. \n You entered {}".format(which_raster))
-        ax.set_aspect(1)
-        return fig, ax
+        if plot:
+            fig, ax = plt.subplots(1, 1, **sk)
+            if which_raster == 'old':
+                im = ax.pcolormesh(self.x_edge, self.y_edge, self.old_array, **pk)
+                fig.colorbar(im, **ck)
+            elif which_raster == 'new':
+                im = ax.pcolormesh(self.x_edge, self.y_edge, self.new_array, **pk)
+                fig.colorbar(im, **ck)
+            else:
+                raise Exception(
+                    "which_raster has to be 'old' or 'new'. \n You entered {}".format(which_raster))
+            ax.set_aspect(1)
+            return fig, ax
 
     def make_clockwise(self, coords):
         '''
@@ -406,44 +447,23 @@ class SourceProcessing(object):
     # c = make_clockwise(coords)
     # print( c)
 
-    def dbf2df(self, dbf_path, index=None, cols=False, incl_index=False):
+    def dbf2df(self, dbf_path, pandas=True):
         '''
-        Read a dbf file as a pandas.DataFrame, optionally selecting the index
-        variable and which columns are to be loaded.
+        Read a dbf file as a geopandas.GeoDataFrame, optionally converting to Pandas.
 
-        __author__  = "Dani Arribas-Bel <darribas@asu.edu> "
         ...
 
         Parameters
         ----------
         dbf_path : str
             Path to the DBF file to be read
-        index : str
-            Name of the column to be used as the index of the DataFrame
-        cols : list
-            List with the names of the columns to be read into the
-            DataFrame. Defaults to False, which reads the whole dbf
-        incl_index : Boolean
-            If True index is included in the DataFrame as a
-            column too. Defaults to False
-
+        pandas : bool
+            Flag to convert geodataframe to datatframe
+ 
         Returns
         -------
-        df : DataFrame
-            pandas DataFrame 
+        df : DataFrame or GeoDataFrame
         '''
-        db = ps.open(dbf_path)
-        if cols:
-            if incl_index:
-                cols.append(index)
-            vars_to_read = cols
-        else:
-            vars_to_read = db.header
-        data = dict([(var, db.by_col(var)) for var in vars_to_read])
-        if index:
-            index = db.by_col(index)
-            db.close()
-            return pd.DataFrame(data, index=index)
-        else:
-            db.close()
-            return pd.DataFrame(data)
+        db = gpd.read_file(dbf_path)
+        if pandas:
+            db = pd.DataFrame(db)
