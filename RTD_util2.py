@@ -90,7 +90,10 @@ class RTD_util(object):
     
         # make a datetime series for timesteps starting with 0
         # totim is elapsed time in simulation time
-        end_date = self.mf_start_date + pd.to_timedelta(np.append(0, kdf.totim), unit='days')
+        units = self.dis.itmuni_dict[self.dis.itmuni][0]
+        if units == 'd':
+            units = 'D'
+        end_date = self.mf_start_date + pd.to_timedelta(np.append(0, kdf.totim), unit=units)
         end_date = end_date.map(lambda t: t.strftime('%Y-%m-%d %H:%M'))
         kdf.loc[:, 'start_date'] = end_date[0:-1]
         kdf.loc[:, 'end_date'] = end_date[1:]
@@ -98,7 +101,7 @@ class RTD_util(object):
         # make a datetime series for timesteps starting with 0
         # totim is elapsed time in simulation time
         # reformat the dates to get rid of seconds
-        end_date = self.mf_start_date + pd.to_timedelta(np.append(0, kdf.totim), unit='days')
+        end_date = self.mf_start_date + pd.to_timedelta(np.append(0, kdf.totim), unit=units)
         kdf.loc[:, 'start_date'] = end_date[0:-1].map(lambda t: t.strftime('%Y-%m-%d %H:%M'))
         kdf.loc[:, 'end_date'] = end_date[1:].map(lambda t: t.strftime('%Y-%m-%d %H:%M'))
     
@@ -374,7 +377,7 @@ class RTD_util(object):
         for dist in self.dist_list:
             self.dist = dist
             lab = '{}_{}'.format(components, dist.name)
-            print('fitting {}'.format(lab))
+            # print('fitting {}'.format(lab))
             try:
                 # with np.errstate(divide='ignore',invalid='ignore'):
                 up1, cov = so.curve_fit(func, lprt, ly, bounds = bnds, method='trf')
