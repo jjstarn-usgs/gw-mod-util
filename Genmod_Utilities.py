@@ -14,7 +14,7 @@ class SourceProcessing(object):
     '''
     Geospatial functions for use with rectangular grid finite-difference models. The purpose
     of this class is to populate a raster grid (in GeoTiff format) with new information, 
-    although it may also be useful for reading, extracting, and diplaying grids from existing 
+    although it may also be useful for reading, extracting, and displaying grids from existing 
     GeoTiffs. To properly initialize this class, you must use either read_raster or create_raster
     to create the initial raster grid ("old_array"). The "new_array" is optional, and it can be
     created by scaling and sampling an existing raster, by rasterizing an existing vector data
@@ -30,7 +30,7 @@ class SourceProcessing(object):
     ----------
     old_array : array (nrow, ncol)
         The numpy array that is either read as part of the input raster (read_raster), or, 
-        if a new raster is created rather being read in, an array of zeros (create_model_grid).
+        if a new raster is created rather being read in, an array of zeros (create_raster).
     new_array : array (nrow, ncol)
         The array that is produced by either rasterizing vector data or resampling and 
         reprojecting raster data.  new_array has the same spatial attributes as old_array. 
@@ -46,8 +46,8 @@ class SourceProcessing(object):
     Methods
     -------
     read_raster(src_pth)
-        Reads an exisiting raster.
-    create_model_grid(theta, origin, LX, LY, nrow, ncol, output_raster_proj)
+        Reads an existing raster.
+    create_raster(theta, origin, LX, LY, nrow, ncol, output_raster_proj)
         Creates a blank model grid in memory.
     prj_coords_to_array_coords(x, y)
         Transforms coordinates.
@@ -89,7 +89,7 @@ class SourceProcessing(object):
 
     def read_raster(self, src_pth):
         '''
-        Reads an exisiting raster that can be used 
+        Reads an existing raster that can be used 
         1. to simply plot the image in real world coordinates,
         2. as a model-grid template for populating the grid with new information, and 
         3. to supply the information needed to transform both ways between a set of 
@@ -275,7 +275,7 @@ class SourceProcessing(object):
 
         self.new_array = grid
 
-    def process_vector_data(self, src, attribute, layer=0):
+    def process_vector_data(self, src, attribute, layer=0, all_touched=False):
         '''
         Takes a vector data source (e.g. ESRI shapefile) and returns a numpy array.
         Arrangement of pixels is given as input and may correspond to a MODFLOW grid.
@@ -299,7 +299,8 @@ class SourceProcessing(object):
 
             dest = self._make_grid()
             args = 'ATTRIBUTE={}'.format(attribute)
-            gdal.RasterizeLayer(dest, [1], layer, options=[args])
+            args2 = 'ALL_TOUCHED={}'.format(all_touched)
+            gdal.RasterizeLayer(dest, [1], layer, options=[args, args2])
 
             grid = dest.GetRasterBand(1).ReadAsArray()
 
