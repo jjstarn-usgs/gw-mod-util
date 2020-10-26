@@ -498,12 +498,15 @@ to be after the particle release'
                     particles along streams. Each cell receives a number of particles in proportion to 
                     the surface-water flow out of the cell (in this case drains).
         '''
-        shp_grp = shp_drn_df.groupby('node')
         x_partloc = list()
         y_partloc = list()
+        node_list = list()
+        label_list = list()
+        
+        shp_grp = shp_drn_df.groupby('node')
         f = total_number_of_particles / total_flow
 
-        def make_particle_locations(k, data, cell_q, line, f, node, total_length):
+        def make_particle_locations(k, data, cell_q, line, f, node, total_length, comid):
             x, y = k.xy
             rel_x = (x - data.loc[node, 'xvert_l']) / \
                 (data.loc[node, 'xvert_r'] - data.loc[node, 'xvert_l'])
@@ -519,64 +522,80 @@ to be after the particle release'
                     rel_x[n], rel_x[n+1], nprt, endpoint=True).tolist())
                 yp.extend(np.linspace(
                     rel_y[n], rel_y[n+1], nprt, endpoint=True).tolist())
+                node_list.extend(np.repeat(node, nprt))
+                label_list.extend(np.repeat(comid, nprt))
             return xp, yp
 
         for node, segments_in_node in shp_grp:
             total_length = segments_in_node.lengths.sum()
             cell_q = segments_in_node.q.mean()
 
-            if np.isfinite(cell_q):
-                for p, segment_geometry in segments_in_node.iterrows():
-                    line_geometry = segment_geometry.geometry
+            for p, segment_geometry in segments_in_node.iterrows():
+                comid = segment_geometry.comid
+                line_geometry = segment_geometry.geometry
 
-                    if line_geometry.geom_type == 'LineString':
-                        line_coords = line_geometry.coords
+                if line_geometry.geom_type == 'LineString':
+                    line_coords = line_geometry.coords
+                    xp, yp = make_particle_locations(
+                        line_coords, data, cell_q, line_geometry, f, node, total_length, comid)
+                    x_partloc.extend(xp)
+                    y_partloc.extend(yp)
+
+                elif line_geometry.geom_type == 'MultiLineString':
+                    for line_part in line_geometry:
+                        line_coords = line_part.coords
                         xp, yp = make_particle_locations(
-                            line_coords, data, cell_q, line_geometry, f, node, total_length)
+                            line_coords, data, cell_q, line_part, f, node, total_length, comid)
                         x_partloc.extend(xp)
                         y_partloc.extend(yp)
 
-                    elif line_geometry.geom_type == 'MultiLineString':
-                        for line_part in line_geometry:
-                            line_coords = line_part.coords
-                            xp, yp = make_particle_locations(
-                                line_coords, data, cell_q, line_part, f, node, total_length)
-                            x_partloc.extend(xp)
-                            y_partloc.extend(yp)
+                else:
+                    'non-line geometry'
 
-                    else:
-                        'non-line geometry'
+        return x_partloc, y_partloc, node_list, label_list
 
-        return x_partloc, y_partloc
-
-    def run_test(self):
+    def run_test(self, num_particles):
         L1 = LineString(((1000, 550, 1), (1050, 550, 1), (1050, 600, 1)))
-        L2 = LineString(((1050, 500, 1), (1050, 550, 1)))
-        L3a = LineString(((1075, 500, 1), (1075, 525, 1), (1100, 525, 1)))
+        L2 = LineString(((1050, 525, 1), (1050, 550, 1)))
+        L3a = LineString(((1075, 500, 1), (1100, 525, 1)))
         L3b = LineString(((1100, 575, 1), (1075, 575, 1), (1075, 600, 1)))
         L3 = MultiLineString((L3a, L3b))
-        gs = gpd.GeoSeries((L1, L2, L3))
+        L4 = LineString(((1100, 525, 1), (1150, 575, 1), (1100, 575, 1)))
+        gs = gpd.GeoSeries((L1, L2, L3, L4))
 
         test_shp = gpd.GeoDataFrame({'geometry': gs,
-                                    'comid': np.arange(3),
-                                    'q': 100,
-                                    'node': 1000})
+                                     'comid': [0, 1, 2, 2],
+                                     'q': [100, 100, 100, 200],
+                                     'node': [1000, 1000, 1000, 2000]})
         test_shp['lengths'] = test_shp.length
 
-        test_data = pd.DataFrame({'xvert_l': [1000], 'xvert_r': [1100], 'yvert_b': [500], 'yvert_t': 600, 'node': 1000})
+        test_data = pd.DataFrame({'xvert_l': [1000, 1100], 'xvert_r': [
+                                 1100, 1200], 'yvert_b': [500, 500], 'yvert_t': [600, 600], 'node': [1000, 2000]})
         test_data.set_index('node', inplace=True)
+            
+        x_partloc, y_partloc, node_list, comid = self.make_stream_particle_array(test_shp, test_data, num_particles, 300)
 
-        test_total_number_of_particles = 100
-        test_x_partloc, test_y_partloc = self.make_stream_particle_array(test_shp, test_data, test_total_number_of_particles, 100)
+        xx = list()
+        yy = list()
 
-        test_x_partloc = [item * 100 + 1000 for item in test_x_partloc]
-        test_y_partloc = [item * 100 + 500 for item in test_y_partloc]
+
+        for i in range(len(node_list)):
+            n = node_list[i]
+            xx.append(x_partloc[i] * 100 + test_data.loc[n, 'xvert_l'])
+            yy.append(y_partloc[i] * 100 + test_data.loc[n, 'yvert_b'])
 
         test_points = list()
-        for i in (zip(test_x_partloc, test_y_partloc)):
+        for i in (zip(xx, yy)):
                   test_points.append(Point(i))
 
         points_gdf = gpd.GeoDataFrame({'geometry': test_points})
 
-        ax = points_gdf.plot(markersize=20, marker='+')
-        test_shp.plot(ax=ax, column='comid') 
+        ax = points_gdf.plot(markersize=40, marker='+', c='k', zorder=2, linewidth=1)
+        test_shp.plot(ax=ax, column='comid', zorder=1, alpha=0.8) 
+
+        for l in [1000, 1100, 1200]:
+            ax.axvline(l, c='k', ls='dashed', lw=0.8)
+            
+        for l in [500, 600]:
+            ax.axhline(l, c='k', ls='dashed', lw=0.8)
+

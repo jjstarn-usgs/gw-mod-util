@@ -349,7 +349,7 @@ class RTD_util(object):
                 'Final Global Y', 'Final Global Z', 'Label']            
 
         # read the endpoint data
-        ep_data = pd.read_table(endpoint_file, names=cols, header=None, skiprows=i, delim_whitespace=True)
+        ep_data = pd.read_csv(endpoint_file, names=cols, header=None, skiprows=i, delim_whitespace=True)
 
         # select only 'Normally Terminated' particles; status code = 2
         ep_data = ep_data.loc[ep_data.Status == 2, :]
