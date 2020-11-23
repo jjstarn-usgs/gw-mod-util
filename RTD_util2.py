@@ -379,45 +379,61 @@ class RTD_util(object):
     def _fit(self, lprt, ly, func, components, bnds):
         for dist in self.dist_list:
             self.dist = dist
-            lab = '{}_{}'.format(components, dist.name)
-            # print('fitting {}'.format(lab))
-            try:
-                # with np.errstate(divide='ignore',invalid='ignore'):
-                up1, cov = so.curve_fit(func, lprt, ly, bounds = bnds, method='trf')
-                e1_cdf = func(lprt, *up1)
-                e1 = ly - e1_cdf
-                sse1 = e1.T.dot(e1)
-            except Exception as e: 
-                print(lab, e)
-                sse1 = np.inf
+            label = '{}_{}'.format(components, dist.name)
+            if components == 'one':
+                numpar = 2
+            if components == 'two':
+                numpar = 5
 
             try:
                 # with np.errstate(divide='ignore',invalid='ignore'):
-                up2, cov = so.curve_fit(func, lprt, ly, bounds = bnds, method='dogbox')
-                e2_cdf = func(lprt, *up2)
-                e2 = ly - e2_cdf
-                sse2 = e2.T.dot(e2)
+                par1, cov1 = so.curve_fit(func, lprt, ly, bounds = bnds, method='trf')
+                cdf1 = func(lprt, *par1)
+                resid1 = ly - cdf1
+                ssr1 = resid1.T.dot(resid1)
+                error_message1 = 'Solved using TRF -- no warnings'
             except Exception as e: 
-                print(lab, e)
-                sse2 = np.inf
+                ssr1 = np.inf
+                error_message1 = 'TRF with warning: {}'.format(e.args)
+                cov1 = np.nan
 
-            if sse1 < sse2:
-                up = up1
-                e_cdf = e1_cdf
-                e = np.sqrt(sse1 / self.s)
-                meth = 'trf'
-            elif sse1 > sse2:
-                up = up2
-                e_cdf = e2_cdf
-                e = np.sqrt(sse2 / self.s)
-                meth = 'dogbox'
-            else:
-                up = np.zeros((5))
-                e_cdf = np.nan
-                e = np.nan
-                meth = 'none'   
+            try:
+                # with np.errstate(divide='ignore',invalid='ignore'):
+                par2, cov2 = so.curve_fit(func, lprt, ly, bounds = bnds, method='dogbox')
+                cdf2 = func(lprt, *par2)
+                resid2 = ly - cdf2
+                ssr2 = resid2.T.dot(resid2)
+                error_message2 = 'Solved using Dogbox -- no warnings'
+            except Exception as e: 
+                ssr2 = np.inf
+                error_message2 = 'Dogbox with warning: {}'.format(e.args)
+                cov2 = np.nan
+
+            if ssr1 < ssr2:
+                par = par1
+                cov = cov1
+                cdf = cdf1
+                rmse = np.sqrt(ssr1 / self.s)
+                method = 'TRF'
+                error_message = error_message1
                 
-            return up, e_cdf, e, meth, lab
+            elif ssr1 > ssr2:
+                par = par2
+                cov = cov2
+                cdf = cdf2
+                rmse = np.sqrt(ssr2 / self.s)
+                method = 'Dogbox'
+                error_message = error_message2
+                
+            else:
+                par = np.zeros((numpar))
+                cov = np.zeros((numpar, numpar))
+                cdf = np.zeros((lprt.shape[0]))
+                rmse = np.nan
+                method = 'TRF and Dogbox did not solve'   
+                error_message = 'No solution with TRF or Dogbox'
+                
+            return par, cdf, cov, rmse, method, label, error_message
 
     def fit_dists(self, ly, lprt, dist_list, fit_one=True, fit_two=False):
         # fit a list of distributions in either one or two components
@@ -439,25 +455,25 @@ class RTD_util(object):
             bnds = (0, [+np.inf, +np.inf])
             func = self._distfit
             
-            up, e_cdf, e, meth, lab = self._fit(lprt, ly, func, 'one', bnds)
+            par_one, cdf_one, cov_one, rmse_one, method_one, label, error_message_one = self._fit(lprt, ly, func, 'one', bnds)
             
-            up = up[0:2]
-            up = np.insert(up, 1, first)
-            param_dict[lab] = up
-            error_dict[lab] = e
-            cdf_dict[lab] = e_cdf
+            par_one = par_one[0:2]
+            par_one = np.insert(par_one, 1, first)
+            param_dict[label] = par_one
+            error_dict[label] = (rmse_one, cov_one, error_message_one, method_one)
+            cdf_dict[label] = cdf_one
 
         if fit_two:
             bnds = (0, [+np.inf, +np.inf, +np.inf, +np.inf, 1.0]) 
             func = self._explicit
             
-            ep, e_cdf, e, meth, lab = self._fit(lprt, ly, func, 'two', bnds)
+            par_two, cdf_two, cov_two, rmse_two, method_two, label, error_message_two = self._fit(lprt, ly, func, 'two', bnds)
             
-            ep = np.insert(ep, 1, first)
-            ep = np.insert(ep, 4, first)
-            param_dict[lab] = ep
-            error_dict[lab] = e
-            cdf_dict[lab] = e_cdf
+            par_two = np.insert(par_two, 1, first)
+            par_two = np.insert(par_two, 4, first)
+            param_dict[label] = par_two
+            error_dict[label] = (rmse_two, cov_two, error_message_two, method_two)
+            cdf_dict[label] = cdf_two
 
         return {'cdf' : cdf_dict, 'par' : param_dict, 'err' : error_dict, 'tt' : tt_dict}
 
