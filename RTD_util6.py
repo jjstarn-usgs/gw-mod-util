@@ -5,11 +5,8 @@ import datetime as dt
 import numpy as np
 import scipy.stats as ss
 import scipy.optimize as so
-<<<<<<< HEAD
 import geopandas as gpd
 from shapely.geometry import LineString, MultiLineString, Point
-=======
->>>>>>> bf46eaaffc9544b2ce96debc4382202030b9c976
 
 # import warnings
 # warnings.filterwarnings("ignore", message="converting a masked element to nan")
@@ -162,16 +159,6 @@ to be after the particle release'
         hin = np.argmax(np.isfinite(self.hd), axis=0)    
         self.water_table =  np.squeeze(self.hd[hin, self.r[0,:,:], self.c[0,:,:]])
     
-<<<<<<< HEAD
-    def get_budget(self, text):
-        # Get the MODFLOW budget file for the time period specified by the MODPATH release date
-        # and the MODFLOW start date. 
-        self._get_kstpkper()
-        budget = self.bud_obj.get_data(kstpkper=self.kstpkper, text=text)
-        self.budget = budget
-        
-=======
->>>>>>> bf46eaaffc9544b2ce96debc4382202030b9c976
     def make_particle_array(self, parts_per_cell):  
         # Given the number of desired particles per cell, return an array in the 
         # format of MODPATH starting location information
@@ -337,16 +324,14 @@ to be after the particle release'
                 os.remove(endpoint_file)
         self.ep_data = ep_data_
 
-<<<<<<< HEAD
-=======
     def get_budget(self, text):
         # Get the MODFLOW budget file for the time period specified by the MODPATH release date
         # and the MODFLOW start date. 
         self._get_kstpkper()
-        budget = self.bud_obj.get_data(kstpkper=self.kstpkper, text=text, full3D=True)[0]
+        # budget = self.bud_obj.get_data(kstpkper=self.kstpkper, text=text, full3D=True)[0]
+        budget = self.bud_obj.get_data(kstpkper=self.kstpkper, text=text)
         self.budget = budget
         
->>>>>>> bf46eaaffc9544b2ce96debc4382202030b9c976
     def _len_mult(self):
         # the database values are in feet; if the model is in meters, 
         # provide a multiplier to convert database values to match the model
@@ -488,7 +473,6 @@ to be after the particle release'
 
         return {'cdf' : cdf_dict, 'par' : param_dict, 'err' : error_dict, 'tt' : tt_dict}
 
-<<<<<<< HEAD
     def make_stream_particle_array(self, shp_drn_df, data, total_number_of_particles, total_flow):
         '''
         Creates local cell stream coordinates given a stream shapefile that has been intersected with the model grid.
@@ -615,8 +599,3 @@ to be after the particle release'
             
         for l in [500, 600]:
             ax.axhline(l, c='k', ls='dashed', lw=0.8)
-
-=======
-
-        
->>>>>>> bf46eaaffc9544b2ce96debc4382202030b9c976
