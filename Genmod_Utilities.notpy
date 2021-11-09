@@ -1,12 +1,12 @@
 import matplotlib.pyplot as plt
-from osgeo import osr
-from osgeo import ogr
+import osr
+import ogr
 import numpy as np
 import pandas as pd
 import os
 # import ast
 from shutil import copyfile
-from osgeo import gdal
+import gdal
 gdal.UseExceptions()
 
 

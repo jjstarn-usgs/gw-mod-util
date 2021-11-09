@@ -362,7 +362,7 @@ to be after the particle release'
         cols = ['Sequence number', 'Particle Group', 'Particle ID', 'Status', 'Initial tracking time', 'Final tracking time', 'Initial cell number', 'Initial layer', 'Initial local x', 'Initial local y', 'Initial local z', 'Initial global x', 'Initial global y', 'Initial global z', 'Initial zone', 'Initial face', 'Final cell number','Final layer', 'Final local x', 'Final local y', 'Final local z', 'Final global x', 'Final global y', 'Final global z', 'Final zone', 'Final face']            
 
         # read the endpoint data
-        ep_data = pd.read_csv(endpoint_file, names=cols, header=None, skiprows=i, delim_whitespace=True)
+        ep_data = pd.read_table(endpoint_file, names=cols, header=None, skiprows=i, delim_whitespace=True)
 
         # select only 'Normally Terminated' particles; status code = 2
         ep_data = ep_data.loc[ep_data.Status == 2, :]
@@ -590,7 +590,7 @@ to be after the particle release'
                                  1100, 1200], 'yvert_b': [500, 500], 'yvert_t': [600, 600], 'node': [1000, 2000]})
         test_data.set_index('node', inplace=True)
             
-        x_partloc, y_partloc, node_list, comid = self.make_stream_particle_array(test_shp, test_data, num_particles)
+        x_partloc, y_partloc, node_list, comid = self.make_stream_particle_array(test_shp, test_data, num_particles, 300)
 
         xx = list()
         yy = list()
