@@ -468,3 +468,40 @@ class SourceProcessing(object):
         db = gpd.read_file(dbf_path)
         if pandas:
             db = pd.DataFrame(db)
+
+def download_and_extract(url, id=None, destination='.'):
+    # importing the requests module
+    import requests, zipfile, py7zr
+    from io import BytesIO
+
+    print('Downloading started')
+    # Downloading the file by sending the request to the URL
+    req = requests.get(url)
+    
+    if id is None:
+        # extracting the zip file contents
+        if url.endswith('zip'):
+            zippy = zipfile.ZipFile(BytesIO(req.content))
+            zippy.extractall(path=destination)
+            
+        if url.endswith('7z'):
+            zippy = py7zr.SevenZipFile(BytesIO(req.content))
+            zippy.extractall(path=destination)
+            
+    else:
+        # extracting the zip file contents where its name contains 'id'
+        
+        if url.endswith('zip'):
+            zippy = zipfile.ZipFile(BytesIO(req.content))
+            file_list = [item for item in zippy.namelist() if id in item]
+            for file in file_list:
+                zippy.extract(file, path=destination)
+                
+        if url.endswith('7z'):
+           zippy = py7zr.SevenZipFile(BytesIO(req.content))
+           file_list = [item for item in zippy.namelist() if id in item]
+           for file in file_list:
+                zippy.extract(file, path=destination)        
+        return file_list
+    print('Downloading Completed')
+

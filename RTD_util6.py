@@ -490,7 +490,7 @@ to be after the particle release'
 
         return {'cdf' : cdf_dict, 'par' : param_dict, 'err' : error_dict, 'tt' : tt_dict}
 
-    def make_stream_particle_array(self, shp_drn_df, data, particles_per_flow):
+    def make_stream_particle_array(self, shp_drn_df, data, particles_per_flow, seg_ref='comid'):
         '''
         Creates local cell stream coordinates given a stream shapefile that has been intersected with the model grid.
 
@@ -509,6 +509,13 @@ to be after the particle release'
                     The total number of particles desired for the simulation
             total_flow: float
                     The total flow rate for the drain package
+            seg_ref: int32
+                    A field in shp_drn_df that contains a unique identifier for stream reaches.
+                    In the NHDPlus 2.0, this is "comid". In the NHDPlus High Resolution, it
+                    could be reachcode or NHDPlusID or something else. It has to be no larger
+                    than about 9-10 digits for FloPy to accept it, and both these choices have
+                    more digits. Some of tdigits aren't needed for the identifier to be unique
+                    and can be truncated.
 
         Returns:
             x_partloc, y_partloc: lists
@@ -548,7 +555,7 @@ to be after the particle release'
             cell_q = segments_in_node.q.mean()
 
             for p, segment_geometry in segments_in_node.iterrows():
-                comid = segment_geometry.comid
+                comid = segment_geometry[seg_ref]
                 line_geometry = segment_geometry.geometry
 
                 if line_geometry.geom_type == 'LineString':
